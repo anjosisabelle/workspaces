@@ -1,54 +1,70 @@
-
 import pandas as pd
+from datetime import datetime
 
-def carregar_dados(origem_path):
-    return pd.read_csv(origem_path)
+# Leitura dos arquivos CSV
+origem = pd.read_csv('origem.csv')
+municipio = pd.read_csv('d_municipio.csv')
+tempo = pd.read_csv('d_tempo.csv')
 
-def filtrar_dados(origem_df):
-    # Filtrar os dados conforme os critérios especificados
-    filtered_df = origem_df[
-        (origem_df['tp_entrada'].isin(['Caso novo', 'Pós-óbito', 'Desconhecido'])) &
-        (origem_df['tp_forma'].isin(['Pulmonar', 'Pulmonar + extrapulmonar'])) &
-        (origem_df['tp_situacao_encerramento'] != 'Mudança de Diagnóstico') &
-        (origem_df['dt_diagnostico_sintoma'] >= '2021-01-01')
-    ]
-    # Converter a coluna 'dt_diagnostico_sintoma' para datetime
-    filtered_df.loc[:, 'dt_diagnostico_sintoma'] = pd.to_datetime(filtered_df['dt_diagnostico_sintoma'])
-    # Criar a coluna 'mês' no formato "<Mês> de <Ano>"
-    filtered_df.loc[:, 'mês'] = filtered_df['dt_diagnostico_sintoma'].dt.strftime('%B de %Y')
-    return filtered_df
+# Verificação das colunas dos arquivos CSV
+print("Colunas do arquivo origem:", origem.columns)
+print("Colunas do arquivo municipio:", municipio.columns)
+print("Colunas do arquivo tempo:", tempo.columns)
 
-def agregar_dados(filtered_df, d_municipio_df):
-    # Mesclar os dados para obter o nome do município
-    merged_df = filtered_df.merge(d_municipio_df, left_on='co_municipio_residencia_atual', right_on='dmun_codibge')
-    # Agrupar os dados por município e mês e contar a quantidade de casos
-    result_df = merged_df.groupby(['dmun_municipio', 'mês']).size().reset_index(name='Quantidade')
-    return result_df
+# Verificação dos valores únicos nas colunas de interesse
+print("Valores únicos em tp_entrada:", origem['tp_entrada'].unique())
+print("Valores únicos em tp_forma:", origem['tp_forma'].unique())
+print("Valores únicos em tp_situacao_encerramento:", origem['tp_situacao_encerramento'].unique())
 
-def preencher_dados_faltantes(result_df, municipios_goias, meses):
-    # Criar um DataFrame com todos os municípios e meses possíveis
-    full_index = pd.MultiIndex.from_product([municipios_goias, meses], names=['dmun_municipio', 'mês'])
-    full_df = pd.DataFrame(index=full_index).reset_index()
-    # Mesclar com o DataFrame resultante para preencher os dados faltantes com zero
-    final_df = full_df.merge(result_df, on=['dmun_municipio', 'mês'], how='left').fillna(0)
-    return final_df
+# Filtragem dos dados conforme os critérios especificados
+origem_filtrada = origem[
+    ((origem['tp_entrada'] == 1) |  # Caso novo
+     (origem['tp_entrada'] == 3) |  # Pós-óbito
+     (origem['tp_entrada'].isna())) &
+    ((origem['tp_forma'] == 1) |  # Pulmonar
+     (origem['tp_forma'] == 2)) &  # Pulmonar + extrapulmonar
+    (origem['tp_situacao_encerramento'] != 10) &  # Mudança de Diagnóstico
+    (origem['dt_diagnostico_sintoma'] >= '2021-01-01')
+]
 
-def salvar_dados(final_df, saida_path):
-    final_df.to_csv(saida_path, index=False)
+# Verificação dos dados filtrados
+print(f"Dados filtrados: {origem_filtrada.shape[0]} linhas")
 
-if __name__ == '__main__':
-    origem_path = 'origem.csv'
-    saida_path = 'saida.csv'
-    d_municipio_data = {
-        'dmun_codibge': [5200100, 5200200, 5200300, 5200400, 5200500],
-        'dmun_municipio': ['Município A', 'Município B', 'Município C', 'Município D', 'Município E']
-    }
-    municipios_goias = ['Município A', 'Município B', 'Município C', 'Município D', 'Município E']
-    
-    origem_df = carregar_dados(origem_path)
-    filtered_df = filtrar_dados(origem_df)
-    d_municipio_df = pd.DataFrame(d_municipio_data)
-    result_df = agregar_dados(filtered_df, d_municipio_df)
-    meses = result_df['mês'].unique()
-    final_df = preencher_dados_faltantes(result_df, municipios_goias, meses)
-    salvar_dados(final_df, saida_path)
+# Merge com a tabela de municípios
+dados_completos = origem_filtrada.merge(municipio, left_on='co_municipio_residencia_atual', right_on='dmun_codibge')
+
+# Verificação do merge
+print(f"Dados após merge: {dados_completos.shape[0]} linhas")
+
+# Conversão da data para o formato desejado
+dados_completos['dt_diagnostico_sintoma'] = pd.to_datetime(dados_completos['dt_diagnostico_sintoma'])
+dados_completos['mês'] = dados_completos['dt_diagnostico_sintoma'].dt.strftime('%B de %Y')
+
+# Agrupamento dos dados
+resultado = dados_completos.groupby(['dmun_municipio', 'mês']).size().reset_index(name='Quantidade')
+
+# Verificação do agrupamento
+print(f"Dados agrupados: {resultado.shape[0]} linhas")
+
+# Adição de todos os municípios e meses possíveis
+todos_municipios = municipio['dmun_municipio'].unique()
+todos_meses = pd.date_range(start='2021-01-01', end=datetime.now(), freq='MS').strftime('%B de %Y')
+
+# Criação de um DataFrame com todos os municípios e meses possíveis
+todos_periodos = pd.MultiIndex.from_product([todos_municipios, todos_meses], names=['dmun_municipio', 'mês']).to_frame(index=False)
+
+# Verificação dos nomes das colunas
+print("Colunas do DataFrame resultado:", resultado.columns)
+print("Colunas do DataFrame todos_periodos:", todos_periodos.columns)
+
+# Merge com o resultado para garantir que todos os períodos estejam presentes
+resultado_completo = todos_periodos.merge(resultado, on=['dmun_municipio', 'mês'], how='left').fillna(0)
+
+# Verificação do resultado final
+print(f"Resultado final: {resultado_completo.shape[0]} linhas")
+
+# Renomeando as colunas
+resultado_completo.columns = ['Município', 'Mês', 'Quantidade']
+
+# Salvando o resultado em um novo arquivo CSV
+resultado_completo.to_csv('saida.csv', index=False)
